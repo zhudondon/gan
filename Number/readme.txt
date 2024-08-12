@@ -15,6 +15,17 @@ pip install tensorflow==2.2.0 -i https://pypi.mirrors.ustc.edu.cn/simple/
 要使用2.2.0才正常
 
 
+ Not found: Resource localhost/_AnonymousVar44/class tensorflow::Var does not exist.
+https://www.bilibili.com/read/cv10197332/
+bug 解决
+
+
+
+
+最终还得
+tensorflow=2.3.0
+keras=2.4.0
+
 
 
 
