@@ -9,5 +9,13 @@ py36
 
 conda install matplotlib
 
+No module named 'tensorflow.python.tools'; 'tensorflow.python' is not a package
+pip install tensorflow==2.2.0 -i https://pypi.mirrors.ustc.edu.cn/simple/
+
+要使用2.2.0才正常
+
+
+
+
 
 

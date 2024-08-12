@@ -7,7 +7,6 @@ from keras.layers.advanced_activations import LeakyReLU
 from keras.layers.convolutional import UpSampling2D, Conv2D
 from keras.models import Sequential, Model
 from keras.optimizers import Adam
-# from keras.optimizer_v1 import Adam
 
 import matplotlib.pyplot as plt
 
