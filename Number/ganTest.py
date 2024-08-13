@@ -10,12 +10,14 @@ from keras.optimizers import Adam
 
 import matplotlib.pyplot as plt
 
+from keras.models import load_model
+
 import sys
 import os
 import numpy as np
 
 class GAN():
-    def __init__(self):
+    def __init__(self,generator_h5=None, combine_h5 = None, discriminator_h5=None):
         # --------------------------------- #
         #   行28，列28，也就是mnist的shape
         # --------------------------------- #
@@ -28,14 +30,24 @@ class GAN():
         # adam优化器 学习率和beta1（不知道什么意思）
         optimizer = Adam(0.0002, 0.5)
 
-        self.discriminator = self.build_discriminator()
+        if discriminator_h5 is not None:
+            self.discriminator = load_model(discriminator_h5)
+        else:
+            self.discriminator = self.build_discriminator()
+
         # 指定 二项交叉熵损失，优化器使用adam
         self.discriminator.compile(loss='binary_crossentropy',
             optimizer=optimizer,
             metrics=['accuracy'])
 
         # 构建 生成器
-        self.generator = self.build_generator()
+        if generator_h5 is not None:
+            self.generator = load_model(generator_h5)
+        else:
+            self.generator = self.build_generator()
+
+
+
         # 生产输入随机值
         gan_input = Input(shape=(self.latent_dim,))
         # 生成图片
@@ -45,8 +57,12 @@ class GAN():
         # 对生成的假图片进行预测
         validity = self.discriminator(img)
         # 输入输出 联合训练 得到最终损失
-        self.combined = Model(gan_input, validity)
-        self.combined.compile(loss='binary_crossentropy', optimizer=optimizer)
+        if combine_h5 is not None:
+            self.combined = load_model(combine_h5)
+        else:
+            self.combined = Model(gan_input, validity)
+            self.combined.compile(loss='binary_crossentropy', optimizer=optimizer)
+
 
 
     def build_generator(self):
@@ -106,6 +122,7 @@ class GAN():
         valid = np.ones((batch_size, 1))
         fake = np.zeros((batch_size, 1))
 
+
         for epoch in range(epochs):
 
             # 这里是同时训练3个网络，g网络 ，d网络 ，gd网络
@@ -161,10 +178,16 @@ class GAN():
             print ("%d [D loss: %f, acc.: %.2f%%] [G loss: %f]" % (epoch, d_loss[0], 100*d_loss[1], g_loss))
 
             if epoch % sample_interval == 0:
-                self.sample_images(epoch)
+                self.sample_images(epoch,"images")
+                # 保存学习权重
+                self.discriminator.save("discriminator.h5")
+                self.discriminator.save_weights("discriminator-weight.h5")
+                self.generator.save("generator.h5")
+                self.generator.save_weights("generator-weight.h5")
+                self.combined.save("combined.h5")
+                self.combined.save_weights("combined-weight.h5")
 
-    def sample_images(self, epoch):
-
+    def sample_images(self, epoch, dirfile):
         r, c = 5, 5
         noise = np.random.normal(0, 1, (r * c, self.latent_dim))
         gen_imgs = self.generator.predict(noise)
@@ -178,12 +201,38 @@ class GAN():
                 axs[i,j].imshow(gen_imgs[cnt, :,:,0], cmap='gray')
                 axs[i,j].axis('off')
                 cnt += 1
-        fig.savefig("images/%d.png" % epoch)
+        fig.savefig(dirfile + "/%d.png" % epoch)
         plt.close()
+    def test_images(self, gen_imgs,r,c,epoch, dirfile):
+        if not os.path.exists("./" + dirfile):
+            os.makedirs("./" + dirfile)
+
+        gen_imgs = 0.5 * gen_imgs + 0.5
+        fig, axs = plt.subplots(r, c)
+        cnt = 0
+        for i in range(r):
+            for j in range(c):
+                axs[i,j].imshow(gen_imgs[cnt, :,:,0], cmap='gray')
+                axs[i,j].axis('off')
+                cnt += 1
+        fig.savefig(dirfile + "/%d.png" % epoch)
+        plt.close()
+
+
+    def test(self):
+        # discriminator = load_model("discriminator.h5")
+        # self.generator = load_model("generator.h5")
+        # combined = load_model("combined.h5")
+        r, c = 5, 5
+        noise = np.random.normal(0, 1, (r * c, self.latent_dim))
+        gen_imgs = self.generator.predict(noise)
+        self.test_images(gen_imgs, r, c, 1,"test")
 
 
 if __name__ == '__main__':
     if not os.path.exists("./images"):
         os.makedirs("./images")
-    gan = GAN()
-    gan.train(epochs=30000, batch_size=256, sample_interval=200)
+    gan = GAN(generator_h5="generator.h5", combine_h5="combined.h5", discriminator_h5="discriminator.h5")
+    # gan.train(epochs=30000, batch_size=256, sample_interval=200)
+    # gan.train(epochs=30000, batch_size=256, sample_interval=200)
+    gan.test()
