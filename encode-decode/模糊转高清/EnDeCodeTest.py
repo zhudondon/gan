@@ -1,9 +1,9 @@
-'''
+"""
 先定义类，必须有个初始化函数
-'''
+"""
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = ""
+# os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
 import numpy as np
 from PIL import Image
@@ -15,6 +15,11 @@ from tensorflow.python.keras.losses import BCE
 from tensorflow.python.keras.models import Model
 from tensorflow.python.keras.optimizers import Adam
 from tensorflow.python.types.core import Tensor
+
+import tensorflow as tf
+
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+
 
 IMAGE_ORDERING = 'channels_last'
 
@@ -202,6 +207,40 @@ class VagueToHD:
     def load_data():
         image_hds = None
         images = None
+
+        """
+            数据分批
+        """
+        # 假设我们有 x_train 和 y_train 数据
+        dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train))
+
+        # 打乱数据，批处理大小为 32，进行预取
+        batch_size = 32
+        dataset = dataset.shuffle(buffer_size=len(x_train)).batch(batch_size).prefetch(tf.data.experimental.AUTOTUNE)
+
+        # 定义 ImageDataGenerator 实例，并进行预处理（如归一化）
+        datagen = ImageDataGenerator(rescale=1. / 255)
+
+        # 从文件夹加载训练数据，设置 target_size 和 batch_size
+        train_generator = datagen.flow_from_directory(
+            'E:/train/gan/DIV2K_train_HR',  # 训练数据的目录
+            target_size=(150, 150),  # 将图片调整到目标尺寸
+            batch_size=32,  # 每次加载32张图片
+            class_mode='categorical'  # 多类别分类任务，'categorical' 会返回 one-hot 编码的标签
+        )
+
+        # 验证数据
+        validation_generator = datagen.flow_from_directory(
+            'dataset/validation',
+            target_size=(150, 150),
+            batch_size=32,
+            class_mode='categorical'
+        )
+
+
+
+
+
         return image_hds, images
 
     def train(self, epochs=100, batch_size=128, sample_interval=50):
