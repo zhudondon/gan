@@ -1,5 +1,15 @@
 """
 先定义类，必须有个初始化函数
+
+思路，如果要让图片达到原图效果，
+那么当前图必须要学习 原图的特征，慢慢向原图靠拢
+
+
+先生成一张图
+原图，假图，进行对比：意思就是 走同一段 特征过程，得到特征，对比
+
+
+
 """
 import os
 
@@ -7,6 +17,7 @@ import PIL.Image
 import numpy as np
 import tensorflow as tf
 from PIL import Image
+from tensorflow.keras.applications.vgg16 import VGG16
 from matplotlib import transforms
 from tensorflow.keras import Input
 from tensorflow.keras.layers import LeakyReLU, BatchNormalization, Dense
@@ -15,6 +26,7 @@ from tensorflow.keras.losses import binary_crossentropy
 from tensorflow.keras.optimizers import Adam
 from tensorflow_core.python.keras.layers import Conv2D, MaxPooling2D
 from tensorflow.keras.models import Model
+from tensorflow_core.python.keras.losses import MSE
 
 from data_loader import DataLoader
 
@@ -26,6 +38,9 @@ test_image = "D:/Users/ai/gan/test_out/test.png"
 one_image = "D:/Users/ai/gan/test_out/one.png"
 
 tf.config.threading.set_inter_op_parallelism_threads(16)
+from tensorflow.keras import backend as K
+
+K.set_image_data_format(IMAGE_ORDERING)
 
 # 图片转数据
 def image_to_data(image):
@@ -35,9 +50,9 @@ def image_to_data(image):
 
 
 # 保存图片
-def save_one_image(epoch, prediction, save_path="image"):
-    if not os.path.exists("./images"):
-        os.makedirs("./images")
+def save_one_image(epoch, prediction, save_path="images"):
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
     file_name = save_path + "/" + str(epoch) + ".png"
     image = PIL.Image.fromarray(np.uint8((prediction)))
     image.save(file_name)
@@ -116,12 +131,16 @@ class VagueToHD:
             4.损失函数
 
             1.编码器初始化 && 解码器初始化 && 模型初始化
+
+            需要一个判别 来区分 你的生成值 和真实值的 模型
         """
         # 原图大小
         self.dataset_name = ""
         self.hr_height = 224
         self.hr_width = 224
         self.batch_size = 100
+
+        self.output_shape = (self.hr_height, self.hr_width, 3)
 
         # 4*4 16个点变成1个点 补丁的大小
         patch = int(self.hr_height / 2 ** 4)
@@ -139,12 +158,27 @@ class VagueToHD:
         # 输入结构 (h,w,c)
         input_shape = Input(shape=(56, 56, 3))
         # 编码器
-        self.encoder = self.build_encoder(input_shape)
+        self.generator = self.build_generator(input_shape)
         # 编译
-        self.encoder.compile(optimizer=self.optimizer, loss=self.loss, metrics=['accuracy'])
+        self.generator.compile(optimizer=self.optimizer, loss=self.loss, metrics=['accuracy'])
 
-        if os.path.exists("encoder-weight.h5"):
-            self.encoder.load_weights("encoder-weight.h5")
+        if os.path.exists("generator-weight.h5"):
+            self.generator.load_weights("generator-weight.h5")
+
+        predict = self.generator(input_shape)
+
+        self.vgg = self.build_vgg()
+        self.vgg.trainable = False
+        feature = self.vgg(predict)
+        # 用于辨别 生成值 和 真实值 ,维度 特征值要一致 先算这个维度就可以，可以更加丰富
+        # 输入预测，得到特征
+        # combine_input = Input(shape=self.output_shape)
+        self.combine = Model(input_shape, feature)
+        # print(combine_input)
+        self.combine.compile(optimizer=self.optimizer, loss=MSE, metrics=['accuracy'])
+        if os.path.exists("combine-weight.h5"):
+            self.combine.load_weights("combine-weight.h5")
+
 
 
     # 构建块
@@ -171,7 +205,19 @@ class VagueToHD:
         x = BatchNormalization(momentum=momentum)(x)
         return x
 
-    def build_encoder(self, input_img):
+    """ 用于 区分生成和真实 图片的 差值， 用mse来计算损失
+        输入图片，得到 特征图
+    """
+    def build_vgg(self):
+        # 建立VGG模型，只使用第9层的特征
+        vgg = VGG16(weights="imagenet")
+        vgg.outputs = [vgg.layers[9].output]
+
+        img = Input(shape=self.output_shape)
+        img_features = vgg(img)
+        return Model(img, img_features)
+
+    def build_generator(self, input_img):
         # 创建一个模型序列
         # model = Sequential()
         # 卷积提前特征
@@ -261,30 +307,40 @@ class VagueToHD:
     #     decoded = Dense(1, activation='sigmoid')(x)
 
 
-    def train(self, epochs=10000, batch_size=1, sample_interval=50):
-        self.batch_size = batch_size
+    def train(self, epochs=30000, batch_size=1, sample_interval=30):
         for epoch in range(epochs):
-
+            epoch += 1000
+            self.batch_size = batch_size
             image_hds, images = self.load_data(batch_size)
-            # 训练损失
-            encode_loss = self.encoder.train_on_batch(images, image_hds)
-            # 输出损失
-            print("%d [loss: %f, acc.: %.2f%%]" % (epoch, encode_loss[0], 100 * encode_loss[1]))
 
-            if epoch % sample_interval == 0:
+            # 训练损失
+            # encode_loss = self.generator.train_on_batch(images, image_hds)
+
+            # generator_predict = self.generator.predict(images)
+            real_feature = self.vgg(image_hds)
+            loss = self.combine.train_on_batch(images, real_feature)
+            # 输出损失
+            # print("%d [loss: %f, acc.: %.2f%%]" % (epoch, encode_loss[0], 100 * encode_loss[1]))
+            print("%d [loss: %f, acc.: %.2f%%]" % (epoch, loss[0], 100 * loss[1]))
+
+            if epoch > 0 and epoch % sample_interval == 0:
                 # 保存图片和权重
                 test_input = np.array([DataLoader.im_read_224(test_image)]) / 127.5 - 1.
-                predict = self.encoder.predict(test_input)
+                predict = self.generator.predict(test_input)
                 # 转换为图片格式rgb 逆运算
                 predict_image = (predict[0] + 1) * 127.5
-                save_one_image(epoch, predict_image, save_path="images")
-                self.encoder.save("encoder.h5")
-                self.encoder.save_weights("encoder-weight.h5")
+                save_one_image(epoch, predict_image, save_path="new-images")
+                self.generator.save("generator.h5")
+                self.generator.save_weights("generator-weight.h5")
+
+                self.combine.save("combine.h5")
+                self.combine.save_weights("combine-weight.h5")
+
 
     def test(self):
-        self.encoder.load_weights("encoder-weight.h5")
+        self.generator.load_weights("generator-weight.h5")
         test_input = np.array([DataLoader.im_read_224(one_image)]) / 127.5 - 1.
-        predict = self.encoder.predict(test_input)
+        predict = self.generator.predict(test_input)
         # 转换为图片格式rgb 逆运算
         predict_image = (predict[0] + 1) * 127.5
         Image.fromarray(predict_image).show()
